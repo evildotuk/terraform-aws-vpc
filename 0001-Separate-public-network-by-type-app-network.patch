@@ -1,0 +1,457 @@
+From e2a6b6fb8cdda6fe759c68c4d2b9a43ecd8c2705 Mon Sep 17 00:00:00 2001
+From: Karol Czeryna <k@e-dot.uk>
+Date: Wed, 13 Jan 2021 10:54:11 +0000
+Subject: [PATCH] Separate public network by type - app & network
+
+---
+ main.tf          | 145 ++++++++++++++++++++++++++++++++++++++---------
+ outputs.tf       |  65 ++++++++++++++++-----
+ variables.tf     |  28 +++++++--
+ vpc-endpoints.tf |   4 +-
+ 4 files changed, 192 insertions(+), 50 deletions(-)
+
+diff --git a/main.tf b/main.tf
+index e83ad61..e738daa 100644
+--- a/main.tf
++++ b/main.tf
+@@ -133,7 +133,7 @@ resource "aws_vpc_dhcp_options_association" "this" {
+ # Internet Gateway
+ ###################
+ resource "aws_internet_gateway" "this" {
+-  count = var.create_vpc && var.create_igw && length(var.public_subnets) > 0 ? 1 : 0
++  count = var.create_vpc && var.create_igw && length(var.public-app_subnets) > 0 && length(var.public-network_subnets) > 0 ? 1 : 0
+ 
+   vpc_id = local.vpc_id
+ 
+@@ -164,13 +164,13 @@ resource "aws_egress_only_internet_gateway" "this" {
+ # Publiс routes
+ ################
+ resource "aws_route_table" "public" {
+-  count = var.create_vpc && length(var.public_subnets) > 0 ? 1 : 0
++  count = var.create_vpc && length(var.public-app_subnets) > 0 && length(var.public-network_subnets) > 0 ? 1 : 0
+ 
+   vpc_id = local.vpc_id
+ 
+   tags = merge(
+     {
+-      "Name" = format("%s-${var.public_subnet_suffix}", var.name)
++      "Name" = format("%s-public", var.name)
+     },
+     var.tags,
+     var.public_route_table_tags,
+@@ -178,7 +178,7 @@ resource "aws_route_table" "public" {
+ }
+ 
+ resource "aws_route" "public_internet_gateway" {
+-  count = var.create_vpc && var.create_igw && length(var.public_subnets) > 0 ? 1 : 0
++  count = var.create_vpc && var.create_igw && length(var.public-app_subnets) > 0 && length(var.public-network_subnets) > 0 ? 1 : 0
+ 
+   route_table_id         = aws_route_table.public[0].id
+   destination_cidr_block = "0.0.0.0/0"
+@@ -190,7 +190,7 @@ resource "aws_route" "public_internet_gateway" {
+ }
+ 
+ resource "aws_route" "public_internet_gateway_ipv6" {
+-  count = var.create_vpc && var.create_igw && var.enable_ipv6 && length(var.public_subnets) > 0 ? 1 : 0
++  count = var.create_vpc && var.create_igw && var.enable_ipv6 && length(var.public-app_subnets) > 0 && length(var.public-network_subnets) > 0 ? 1 : 0
+ 
+   route_table_id              = aws_route_table.public[0].id
+   destination_ipv6_cidr_block = "::/0"
+@@ -324,13 +324,13 @@ resource "aws_route_table" "intra" {
+ }
+ 
+ ################
+-# Public subnet
++# Public-App subnet
+ ################
+-resource "aws_subnet" "public" {
+-  count = var.create_vpc && length(var.public_subnets) > 0 && (false == var.one_nat_gateway_per_az || length(var.public_subnets) >= length(var.azs)) ? length(var.public_subnets) : 0
++resource "aws_subnet" "public-app" {
++  count = var.create_vpc && length(var.public-app_subnets) > 0 && (false == var.one_nat_gateway_per_az || length(var.public-app_subnets) >= length(var.azs)) ? length(var.public-app_subnets) : 0
+ 
+   vpc_id                          = local.vpc_id
+-  cidr_block                      = element(concat(var.public_subnets, [""]), count.index)
++  cidr_block                      = element(concat(var.public-app_subnets, [""]), count.index)
+   availability_zone               = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) > 0 ? element(var.azs, count.index) : null
+   availability_zone_id            = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) == 0 ? element(var.azs, count.index) : null
+   map_public_ip_on_launch         = var.map_public_ip_on_launch
+@@ -341,13 +341,41 @@ resource "aws_subnet" "public" {
+   tags = merge(
+     {
+       "Name" = format(
+-        "%s-${var.public_subnet_suffix}-%s",
++        "%s-${var.public-app_subnet_suffix}-%s",
+         var.name,
+         element(var.azs, count.index),
+       )
+     },
+     var.tags,
+-    var.public_subnet_tags,
++    var.public-app_subnet_tags,
++  )
++}
++
++################
++# Public-Network subnet
++################
++resource "aws_subnet" "public-network" {
++  count = var.create_vpc && length(var.public-network_subnets) > 0 && (false == var.one_nat_gateway_per_az || length(var.public-network_subnets) >= length(var.azs)) ? length(var.public-network_subnets) : 0
++
++  vpc_id                          = local.vpc_id
++  cidr_block                      = element(concat(var.public-network_subnets, [""]), count.index)
++  availability_zone               = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) > 0 ? element(var.azs, count.index) : null
++  availability_zone_id            = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) == 0 ? element(var.azs, count.index) : null
++  map_public_ip_on_launch         = var.map_public_ip_on_launch
++  assign_ipv6_address_on_creation = var.public_subnet_assign_ipv6_address_on_creation == null ? var.assign_ipv6_address_on_creation : var.public_subnet_assign_ipv6_address_on_creation
++
++  ipv6_cidr_block = var.enable_ipv6 && length(var.public_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.public_subnet_ipv6_prefixes[count.index]) : null
++
++  tags = merge(
++    {
++      "Name" = format(
++        "%s-${var.public-network_subnet_suffix}-%s",
++        var.name,
++        element(var.azs, count.index),
++      )
++    },
++    var.tags,
++    var.public-network_subnet_tags,
+   )
+ }
+ 
+@@ -538,7 +566,8 @@ resource "aws_default_network_acl" "this" {
+   #   for any of the non-default network ACLs
+   subnet_ids = setsubtract(
+     compact(flatten([
+-      aws_subnet.public.*.id,
++      aws_subnet.public-app.*.id,
++      aws_subnet.public-network.*.id,
+       aws_subnet.private.*.id,
+       aws_subnet.intra.*.id,
+       aws_subnet.database.*.id,
+@@ -546,7 +575,8 @@ resource "aws_default_network_acl" "this" {
+       aws_subnet.elasticache.*.id,
+     ])),
+     compact(flatten([
+-      aws_network_acl.public.*.subnet_ids,
++      aws_network_acl.public-app.*.subnet_ids,
++      aws_network_acl.public-network.*.subnet_ids,
+       aws_network_acl.private.*.subnet_ids,
+       aws_network_acl.intra.*.subnet_ids,
+       aws_network_acl.database.*.subnet_ids,
+@@ -594,27 +624,27 @@ resource "aws_default_network_acl" "this" {
+ }
+ 
+ ########################
+-# Public Network ACLs
++# Public-App Network ACLs
+ ########################
+-resource "aws_network_acl" "public" {
+-  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public_subnets) > 0 ? 1 : 0
++resource "aws_network_acl" "public-app" {
++  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public-app_subnets) > 0 ? 1 : 0
+ 
+   vpc_id     = element(concat(aws_vpc.this.*.id, [""]), 0)
+-  subnet_ids = aws_subnet.public.*.id
++  subnet_ids = aws_subnet.public-app.*.id
+ 
+   tags = merge(
+     {
+-      "Name" = format("%s-${var.public_subnet_suffix}", var.name)
++      "Name" = format("%s-${var.public-app_subnet_suffix}", var.name)
+     },
+     var.tags,
+     var.public_acl_tags,
+   )
+ }
+ 
+-resource "aws_network_acl_rule" "public_inbound" {
+-  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public_subnets) > 0 ? length(var.public_inbound_acl_rules) : 0
++resource "aws_network_acl_rule" "public-app_inbound" {
++  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public-app_subnets) > 0 ? length(var.public_inbound_acl_rules) : 0
+ 
+-  network_acl_id = aws_network_acl.public[0].id
++  network_acl_id = aws_network_acl.public-app[0].id
+ 
+   egress          = false
+   rule_number     = var.public_inbound_acl_rules[count.index]["rule_number"]
+@@ -628,10 +658,62 @@ resource "aws_network_acl_rule" "public_inbound" {
+   ipv6_cidr_block = lookup(var.public_inbound_acl_rules[count.index], "ipv6_cidr_block", null)
+ }
+ 
+-resource "aws_network_acl_rule" "public_outbound" {
+-  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public_subnets) > 0 ? length(var.public_outbound_acl_rules) : 0
++resource "aws_network_acl_rule" "public-app_outbound" {
++  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public-app_subnets) > 0 ? length(var.public_outbound_acl_rules) : 0
+ 
+-  network_acl_id = aws_network_acl.public[0].id
++  network_acl_id = aws_network_acl.public-app[0].id
++
++  egress          = true
++  rule_number     = var.public_outbound_acl_rules[count.index]["rule_number"]
++  rule_action     = var.public_outbound_acl_rules[count.index]["rule_action"]
++  from_port       = lookup(var.public_outbound_acl_rules[count.index], "from_port", null)
++  to_port         = lookup(var.public_outbound_acl_rules[count.index], "to_port", null)
++  icmp_code       = lookup(var.public_outbound_acl_rules[count.index], "icmp_code", null)
++  icmp_type       = lookup(var.public_outbound_acl_rules[count.index], "icmp_type", null)
++  protocol        = var.public_outbound_acl_rules[count.index]["protocol"]
++  cidr_block      = lookup(var.public_outbound_acl_rules[count.index], "cidr_block", null)
++  ipv6_cidr_block = lookup(var.public_outbound_acl_rules[count.index], "ipv6_cidr_block", null)
++}
++
++########################
++# Public-Network Network ACLs
++########################
++resource "aws_network_acl" "public-network" {
++  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public-network_subnets) > 0 ? 1 : 0
++
++  vpc_id     = element(concat(aws_vpc.this.*.id, [""]), 0)
++  subnet_ids = aws_subnet.public-network.*.id
++
++  tags = merge(
++    {
++      "Name" = format("%s-${var.public-network_subnet_suffix}", var.name)
++    },
++    var.tags,
++    var.public_acl_tags,
++  )
++}
++
++resource "aws_network_acl_rule" "public-network_inbound" {
++  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public-network_subnets) > 0 ? length(var.public_inbound_acl_rules) : 0
++
++  network_acl_id = aws_network_acl.public-network[0].id
++
++  egress          = false
++  rule_number     = var.public_inbound_acl_rules[count.index]["rule_number"]
++  rule_action     = var.public_inbound_acl_rules[count.index]["rule_action"]
++  from_port       = lookup(var.public_inbound_acl_rules[count.index], "from_port", null)
++  to_port         = lookup(var.public_inbound_acl_rules[count.index], "to_port", null)
++  icmp_code       = lookup(var.public_inbound_acl_rules[count.index], "icmp_code", null)
++  icmp_type       = lookup(var.public_inbound_acl_rules[count.index], "icmp_type", null)
++  protocol        = var.public_inbound_acl_rules[count.index]["protocol"]
++  cidr_block      = lookup(var.public_inbound_acl_rules[count.index], "cidr_block", null)
++  ipv6_cidr_block = lookup(var.public_inbound_acl_rules[count.index], "ipv6_cidr_block", null)
++}
++
++resource "aws_network_acl_rule" "public-network_outbound" {
++  count = var.create_vpc && var.public_dedicated_network_acl && length(var.public-network_subnets) > 0 ? length(var.public_outbound_acl_rules) : 0
++
++  network_acl_id = aws_network_acl.public-network[0].id
+ 
+   egress          = true
+   rule_number     = var.public_outbound_acl_rules[count.index]["rule_number"]
+@@ -949,7 +1031,7 @@ resource "aws_nat_gateway" "this" {
+     var.single_nat_gateway ? 0 : count.index,
+   )
+   subnet_id = element(
+-    aws_subnet.public.*.id,
++    aws_subnet.public-network.*.id,
+     var.single_nat_gateway ? 0 : count.index,
+   )
+ 
+@@ -1051,10 +1133,17 @@ resource "aws_route_table_association" "intra" {
+   route_table_id = element(aws_route_table.intra.*.id, 0)
+ }
+ 
+-resource "aws_route_table_association" "public" {
+-  count = var.create_vpc && length(var.public_subnets) > 0 ? length(var.public_subnets) : 0
++resource "aws_route_table_association" "public-app" {
++  count = var.create_vpc && length(var.public-app_subnets) > 0 ? length(var.public-app_subnets) : 0
++
++  subnet_id      = element(aws_subnet.public-app.*.id, count.index)
++  route_table_id = aws_route_table.public[0].id
++}
++
++resource "aws_route_table_association" "public-network" {
++  count = var.create_vpc && length(var.public-network_subnets) > 0 ? length(var.public-network_subnets) : 0
+ 
+-  subnet_id      = element(aws_subnet.public.*.id, count.index)
++  subnet_id      = element(aws_subnet.public-network.*.id, count.index)
+   route_table_id = aws_route_table.public[0].id
+ }
+ 
+diff --git a/outputs.tf b/outputs.tf
+index 4be2766..dc081a5 100644
+--- a/outputs.tf
++++ b/outputs.tf
+@@ -88,24 +88,44 @@ output "private_subnets_ipv6_cidr_blocks" {
+   value       = aws_subnet.private.*.ipv6_cidr_block
+ }
+ 
+-output "public_subnets" {
++output "public-app_subnets" {
+   description = "List of IDs of public subnets"
+-  value       = aws_subnet.public.*.id
++  value       = aws_subnet.public-app.*.id
+ }
+ 
+-output "public_subnet_arns" {
++output "public-network_subnets" {
++  description = "List of IDs of public subnets"
++  value       = aws_subnet.public-network.*.id
++}
++
++output "public-app_subnet_arns" {
++  description = "List of ARNs of public subnets"
++  value       = aws_subnet.public-app.*.arn
++}
++
++output "public-network_subnet_arns" {
+   description = "List of ARNs of public subnets"
+-  value       = aws_subnet.public.*.arn
++  value       = aws_subnet.public-network.*.arn
+ }
+ 
+-output "public_subnets_cidr_blocks" {
++output "public-app_subnets_cidr_blocks" {
+   description = "List of cidr_blocks of public subnets"
+-  value       = aws_subnet.public.*.cidr_block
++  value       = aws_subnet.public-app.*.cidr_block
++}
++
++output "public-network_subnets_cidr_blocks" {
++  description = "List of cidr_blocks of public subnets"
++  value       = aws_subnet.public-network.*.cidr_block
++}
++
++output "public-app_subnets_ipv6_cidr_blocks" {
++  description = "List of IPv6 cidr_blocks of public subnets in an IPv6 enabled VPC"
++  value       = aws_subnet.public-app.*.ipv6_cidr_block
+ }
+ 
+-output "public_subnets_ipv6_cidr_blocks" {
++output "public-network_subnets_ipv6_cidr_blocks" {
+   description = "List of IPv6 cidr_blocks of public subnets in an IPv6 enabled VPC"
+-  value       = aws_subnet.public.*.ipv6_cidr_block
++  value       = aws_subnet.public-network.*.ipv6_cidr_block
+ }
+ 
+ output "database_subnets" {
+@@ -303,9 +323,14 @@ output "intra_route_table_association_ids" {
+   value       = aws_route_table_association.intra.*.id
+ }
+ 
+-output "public_route_table_association_ids" {
+-  description = "List of IDs of the public route table association"
+-  value       = aws_route_table_association.public.*.id
++output "public-app_route_table_association_ids" {
++  description = "List of IDs of the public-app route table association"
++  value       = aws_route_table_association.public-app.*.id
++}
++
++output "public-network_route_table_association_ids" {
++  description = "List of IDs of the public-network route table association"
++  value       = aws_route_table_association.public-network.*.id
+ }
+ 
+ output "nat_ids" {
+@@ -417,14 +442,24 @@ output "default_vpc_main_route_table_id" {
+   value       = concat(aws_default_vpc.this.*.main_route_table_id, [""])[0]
+ }
+ 
+-output "public_network_acl_id" {
++output "public-app_network_acl_id" {
++  description = "ID of the public network ACL"
++  value       = concat(aws_network_acl.public-app.*.id, [""])[0]
++}
++
++output "public-app_network_acl_arn" {
++  description = "ARN of the public network ACL"
++  value       = concat(aws_network_acl.public-app.*.arn, [""])[0]
++}
++
++output "public-network_network_acl_id" {
+   description = "ID of the public network ACL"
+-  value       = concat(aws_network_acl.public.*.id, [""])[0]
++  value       = concat(aws_network_acl.public-network.*.id, [""])[0]
+ }
+ 
+-output "public_network_acl_arn" {
++output "public-network_network_acl_arn" {
+   description = "ARN of the public network ACL"
+-  value       = concat(aws_network_acl.public.*.arn, [""])[0]
++  value       = concat(aws_network_acl.public-network.*.arn, [""])[0]
+ }
+ 
+ output "private_network_acl_id" {
+diff --git a/variables.tf b/variables.tf
+index 2236973..5395868 100644
+--- a/variables.tf
++++ b/variables.tf
+@@ -112,10 +112,16 @@ variable "instance_tenancy" {
+   default     = "default"
+ }
+ 
+-variable "public_subnet_suffix" {
++variable "public-app_subnet_suffix" {
+   description = "Suffix to append to public subnets name"
+   type        = string
+-  default     = "public"
++  default     = "public-app"
++}
++
++variable "public-network_subnet_suffix" {
++  description = "Suffix to append to public subnets name"
++  type        = string
++  default     = "public-network"
+ }
+ 
+ variable "private_subnet_suffix" {
+@@ -148,8 +154,14 @@ variable "elasticache_subnet_suffix" {
+   default     = "elasticache"
+ }
+ 
+-variable "public_subnets" {
+-  description = "A list of public subnets inside the VPC"
++variable "public-app_subnets" {
++  description = "A list of public-app subnets inside the VPC"
++  type        = list(string)
++  default     = []
++}
++
++variable "public-network_subnets" {
++  description = "A list of public-network subnets inside the VPC"
+   type        = list(string)
+   default     = []
+ }
+@@ -1955,7 +1967,13 @@ variable "igw_tags" {
+   default     = {}
+ }
+ 
+-variable "public_subnet_tags" {
++variable "public-app_subnet_tags" {
++  description = "Additional tags for the public subnets"
++  type        = map(string)
++  default     = {}
++}
++
++variable "public-network_subnet_tags" {
+   description = "Additional tags for the public subnets"
+   type        = map(string)
+   default     = {}
+diff --git a/vpc-endpoints.tf b/vpc-endpoints.tf
+index 1a3dedd..4df2376 100644
+--- a/vpc-endpoints.tf
++++ b/vpc-endpoints.tf
+@@ -30,7 +30,7 @@ resource "aws_vpc_endpoint_route_table_association" "intra_s3" {
+ }
+ 
+ resource "aws_vpc_endpoint_route_table_association" "public_s3" {
+-  count = var.create_vpc && var.enable_s3_endpoint && var.enable_public_s3_endpoint && length(var.public_subnets) > 0 ? 1 : 0
++  count = var.create_vpc && var.enable_s3_endpoint && var.enable_public_s3_endpoint && length(var.public-app_subnets) > 0 && length(var.public-network_subnets) > 0 ? 1 : 0
+ 
+   vpc_endpoint_id = aws_vpc_endpoint.s3[0].id
+   route_table_id  = aws_route_table.public[0].id
+@@ -68,7 +68,7 @@ resource "aws_vpc_endpoint_route_table_association" "intra_dynamodb" {
+ }
+ 
+ resource "aws_vpc_endpoint_route_table_association" "public_dynamodb" {
+-  count = var.create_vpc && var.enable_dynamodb_endpoint && length(var.public_subnets) > 0 ? 1 : 0
++  count = var.create_vpc && var.enable_dynamodb_endpoint && length(var.public-app_subnets) > 0 && length(var.public-network_subnets) > 0 ? 1 : 0
+ 
+   vpc_endpoint_id = aws_vpc_endpoint.dynamodb[0].id
+   route_table_id  = aws_route_table.public[0].id
+-- 
+2.24.3 (Apple Git-128)
+
