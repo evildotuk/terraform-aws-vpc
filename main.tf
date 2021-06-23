@@ -202,7 +202,7 @@ resource "aws_route_table" "public" {
 
   tags = merge(
     {
-      "Name" = format("%s-public", var.name)
+      "Name" = format("%s-public-%s", var.name, substr(element(var.azs, count.index), -1, 1),)
     },
     var.tags,
     var.public_route_table_tags,
@@ -238,13 +238,12 @@ resource "aws_route_table" "private" {
   count = var.create_vpc && local.max_subnet_length > 0 ? local.nat_gateway_count : 0
 
   vpc_id = local.vpc_id
-
   tags = merge(
     {
       "Name" = var.single_nat_gateway ? "${var.name}-${var.private_subnet_suffix}" : format(
         "%s-${var.private_subnet_suffix}-%s",
         var.name,
-        element(var.azs, count.index),
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -266,7 +265,7 @@ resource "aws_route_table" "database" {
       "Name" = var.single_nat_gateway || var.create_database_internet_gateway_route ? "${var.name}-${var.database_subnet_suffix}" : format(
         "%s-${var.database_subnet_suffix}-%s",
         var.name,
-        element(var.azs, count.index),
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -379,11 +378,19 @@ resource "aws_subnet" "public-app" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.public_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.public_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.public-app_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.public-app_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.public-app_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -407,11 +414,19 @@ resource "aws_subnet" "public-network" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.public_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.public_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.public-network_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.public-network_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.public-network_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -435,11 +450,19 @@ resource "aws_subnet" "private" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.private_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.private_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.private_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.private_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.private_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -464,11 +487,19 @@ resource "aws_subnet" "outpost" {
   outpost_arn = var.outpost_arn
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.outpost_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.outpost_subnet_suffix}-%s",
-        var.name,
-        var.outpost_az,
+        "${var.outpost_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -492,11 +523,19 @@ resource "aws_subnet" "database" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.database_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.database_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.database_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.database_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.database_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -536,11 +575,19 @@ resource "aws_subnet" "redshift" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.redshift_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.redshift_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.redshift_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.redshift_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.redshift_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -580,11 +627,19 @@ resource "aws_subnet" "elasticache" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.elasticache_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.elasticache_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.elasticache_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.elasticache_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.elasticache_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
@@ -616,11 +671,19 @@ resource "aws_subnet" "intra" {
   ipv6_cidr_block = var.enable_ipv6 && length(var.intra_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.intra_subnet_ipv6_prefixes[count.index]) : null
 
   tags = merge(
+  # V1
+  # merge(
+  # {
+  #     "Name" = format(
+  #       "%s-${var.intra_subnet_suffix}-%s",
+  #       var.name,
+  #       element(var.azs, count.index),
+  #     )
+  # v2
     {
       "Name" = format(
-        "%s-${var.intra_subnet_suffix}-%s",
-        var.name,
-        element(var.azs, count.index),
+        "${var.intra_subnet_suffix}-%s",
+        substr(element(var.azs, count.index), -1, 1),
       )
     },
     var.tags,
